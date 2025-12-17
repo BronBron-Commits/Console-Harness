@@ -2,23 +2,21 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+
+    <!-- FORCE REAL CONSOLE EXECUTABLE -->
     <OutputType>Exe</OutputType>
+    <UseAppHost>true</UseAppHost>
 
-    <!-- ARCHITECTURE FIX -->
+    <!-- ARCH -->
     <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
 
+    <!-- NORMAL HARNESS SETTINGS -->
     <AssemblyName>U-DW-ManagedWrapper</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
-
-  <!-- HARD ISOLATION: only compile the harness -->
-  <ItemGroup>
-    <Compile Remove="**\*.cs" />
-    <Compile Include="Program.cs" />
-    <Compile Include="Instrumentation\**\*.cs" />
-  </ItemGroup>
 
 </Project>
