@@ -21,18 +21,14 @@ namespace SocketClient
         // Entry
         // =========================================================
 
-        static void Main(string[] args)
+        static void Main()
         {
             Log("starting");
-
             Directory.CreateDirectory("captures");
 
-            var stopwatch = Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
 
-            using var client = new TcpClient
-            {
-                NoDelay = true
-            };
+            using var client = new TcpClient { NoDelay = true };
 
             // -----------------------------------------------------
             // PHASE 1: TCP CONNECT
@@ -40,7 +36,7 @@ namespace SocketClient
 
             Log("connecting...");
             client.Connect(HOST, PORT);
-            Log($"connected @ {stopwatch.ElapsedMilliseconds}ms");
+            Log($"connected @ {sw.ElapsedMilliseconds}ms");
 
             using var stream = client.GetStream();
             stream.ReadTimeout = 5000;
@@ -61,8 +57,7 @@ namespace SocketClient
                 0x00, 0x00
             };
 
-            Log("sending client hello");
-            SendFrame(stream, clientHello, "client hello");
+            Send(stream, clientHello, "client-hello");
 
             Thread.Sleep(TimingProfile.BeforeLoginDelay);
 
@@ -70,7 +65,7 @@ namespace SocketClient
             // PHASE 3: RECEIVE SERVER ENVELOPE
             // -----------------------------------------------------
 
-            var buffer = new byte[8192];
+            byte[] buffer = new byte[8192];
             int read;
 
             try
@@ -89,14 +84,10 @@ namespace SocketClient
                 return;
             }
 
-            Log($"received server envelope ({read} bytes)");
-
             byte[] envelope = buffer.Take(read).ToArray();
+            File.WriteAllBytes("captures/server-envelope.bin", envelope);
 
-            string envPath = Path.Combine("captures", "server-envelope.bin");
-            File.WriteAllBytes(envPath, envelope);
-            Log($"saved raw envelope to {envPath}");
-
+            Log($"received server envelope ({read} bytes)");
             HexDump.Dump(envelope, envelope.Length, "[RX]");
 
             // -----------------------------------------------------
@@ -106,110 +97,77 @@ namespace SocketClient
             AuthEnvelopeDecoder.Decode(envelope);
 
             // -----------------------------------------------------
-            // PHASE 5: CAPABILITY ACK (SEMANTIC ACCEPTANCE)
-            // -----------------------------------------------------
-            //
-            // Capability extracted from inflated payload:
-            //   ID      = 0x5104
-            //   Version = 0x0002
-            //
-
-            byte[] capabilityAck =
-            {
-                0x00, 0x0E,       // length = 14 bytes
-                0x00, 0x02,       // message type = ACK
-                0x00, 0x24,       // opcode / channel
-                0x51, 0x04,       // capability ID
-                0x00, 0x02,       // capability version
-                0x00, 0x01,       // accept = true
-                0x00, 0x00        // terminator
-            };
-
-            Log("sending capability ACK (accept)");
-            SendFrame(stream, capabilityAck, "capability-ack");
-
-            // -----------------------------------------------------
-            // PHASE 6: PASSIVE RECEIVE LOOP (PHASE 2 OBSERVE)
+            // PHASE 5: PHASE-2 LOGIN FRAME (STRUCTURAL TEST)
             // -----------------------------------------------------
 
-            Log("entering receive loop (post-capability ACK)");
+            Log("building login-frame candidate");
 
-            ReceiveLoop(client, stream);
+            byte[] inflatedClone = AuthEnvelopeDecoder.LastInflatedPayload;
 
-            Log("exiting");
-        }
+            byte[] loginFrame = AuthFrameBuilder.Build(
+                messageType: 0x0000,
+                flags: 0xFFFF,
+                phase: 0x0002, // phase-2 attempt
+                inflatedPayload: inflatedClone
+            );
 
-        // =========================================================
-        // Networking Helpers
-        // =========================================================
+            Send(stream, loginFrame, "login-frame");
 
-        private static void SendFrame(NetworkStream stream, byte[] frame, string label)
-        {
+            // -----------------------------------------------------
+            // PHASE 6: OBSERVE SERVER BEHAVIOR
+            // -----------------------------------------------------
+
+            Log("waiting for phase-2 login response");
+
             try
             {
-                stream.Write(frame, 0, frame.Length);
-                stream.Flush();
-                Log($"sent {label} ({frame.Length} bytes)");
+                while (client.Connected)
+                {
+                    if (!stream.DataAvailable)
+                    {
+                        Thread.Sleep(50);
+                        continue;
+                    }
+
+                    int r = stream.Read(buffer, 0, buffer.Length);
+                    if (r <= 0)
+                    {
+                        Log("server closed connection");
+                        break;
+                    }
+
+                    byte[] pkt = buffer.Take(r).ToArray();
+                    string fname = $"captures/server-response-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.bin";
+                    File.WriteAllBytes(fname, pkt);
+
+                    Log($"received {r} bytes");
+                    HexDump.Dump(pkt, pkt.Length, "[RX]");
+                }
             }
-            catch (Exception ex)
+            catch (IOException)
             {
-                Log($"WRITE ERROR [{label}]: {ex.GetType().Name} {ex.Message}");
-                throw;
+                // This timeout is EXPECTED if the server rejects or ignores the login frame
+                Log("no phase-2 response (timeout reached)");
+                Log("server is enforcing protocol semantics — boundary confirmed");
             }
-        }
 
-        private static void ReceiveLoop(TcpClient client, NetworkStream stream)
-        {
-            var buffer = new byte[8192];
-
-            while (true)
-            {
-                if (!client.Connected)
-                {
-                    Log("socket disconnected");
-                    break;
-                }
-
-                if (!stream.DataAvailable)
-                {
-                    Thread.Sleep(50);
-                    continue;
-                }
-
-                int read;
-                try
-                {
-                    read = stream.Read(buffer, 0, buffer.Length);
-                }
-                catch (Exception ex)
-                {
-                    Log($"READ ERROR: {ex.GetType().Name} {ex.Message}");
-                    break;
-                }
-
-                if (read == 0)
-                {
-                    Log("server closed connection");
-                    break;
-                }
-
-                byte[] packet = buffer.Take(read).ToArray();
-
-                Log($"received {read} bytes (post-ACK)");
-                HexDump.Dump(packet, packet.Length, "[RX]");
-
-                string fname = $"captures/server-followup-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.bin";
-                File.WriteAllBytes(fname, packet);
-            }
+            Log("exit");
         }
 
         // =========================================================
-        // Logging
+        // Helpers
         // =========================================================
 
-        private static void Log(string message)
+        private static void Send(NetworkStream stream, byte[] data, string label)
         {
-            Console.WriteLine($"[shadow] {message}");
+            stream.Write(data, 0, data.Length);
+            stream.Flush();
+            Log($"sent {label} ({data.Length} bytes)");
+        }
+
+        private static void Log(string msg)
+        {
+            Console.WriteLine($"[shadow] {msg}");
         }
     }
 }
