@@ -106,26 +106,33 @@ namespace SocketClient
             AuthEnvelopeDecoder.Decode(envelope);
 
             // -----------------------------------------------------
-            // PHASE 5: PHASE-1 ACK (STATE ADVANCE)
+            // PHASE 5: CAPABILITY ACK (SEMANTIC ACCEPTANCE)
             // -----------------------------------------------------
+            //
+            // Capability extracted from inflated payload:
+            //   ID      = 0x5104
+            //   Version = 0x0002
+            //
 
-            byte[] phase1Ack =
+            byte[] capabilityAck =
             {
-                0x00, 0x0A,
-                0x00, 0x02,
-                0x00, 0x24,
-                0x00, 0x03,
-                0x00, 0x00
+                0x00, 0x0E,       // length = 14 bytes
+                0x00, 0x02,       // message type = ACK
+                0x00, 0x24,       // opcode / channel
+                0x51, 0x04,       // capability ID
+                0x00, 0x02,       // capability version
+                0x00, 0x01,       // accept = true
+                0x00, 0x00        // terminator
             };
 
-            Log("sending phase1 ACK");
-            SendFrame(stream, phase1Ack, "phase1-ack");
+            Log("sending capability ACK (accept)");
+            SendFrame(stream, capabilityAck, "capability-ack");
 
             // -----------------------------------------------------
-            // PHASE 6: PASSIVE RECEIVE LOOP (NEXT STATE)
+            // PHASE 6: PASSIVE RECEIVE LOOP (PHASE 2 OBSERVE)
             // -----------------------------------------------------
 
-            Log("entering receive loop (post-ACK)");
+            Log("entering receive loop (post-capability ACK)");
 
             ReceiveLoop(client, stream);
 
@@ -191,7 +198,6 @@ namespace SocketClient
                 Log($"received {read} bytes (post-ACK)");
                 HexDump.Dump(packet, packet.Length, "[RX]");
 
-                // Save follow-up packets for analysis
                 string fname = $"captures/server-followup-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.bin";
                 File.WriteAllBytes(fname, packet);
             }
