@@ -1,21 +1,24 @@
 using System;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 
 namespace SocketClient.Protocol
 {
-    public static class AuthEnvelopeDecoder
+    internal static class AuthEnvelopeDecoder
     {
-        public static byte[] LastInflatedPayload { get; private set; } = Array.Empty<byte>();
+        public static byte[] LastPayloadRaw;
+        public static byte[] LastInflatedPayload;
 
         public static void Decode(byte[] frame)
         {
-            ushort totalLen = ReadU16(frame, 0);
-            ushort msgType  = ReadU16(frame, 2);
-            ushort flags    = ReadU16(frame, 4);
-            ushort phase    = ReadU16(frame, 6);
-            ushort reserved = ReadU16(frame, 8);
+            using var ms = new MemoryStream(frame);
+            using var br = new BinaryReader(ms);
+
+            ushort totalLen = ReadBE16(br);
+            ushort msgType  = ReadBE16(br);
+            ushort flags    = ReadBE16(br);
+            ushort phase    = ReadBE16(br);
+            ushort reserved = ReadBE16(br);
 
             Console.WriteLine($"[decode] totalLen = {totalLen}");
             Console.WriteLine($"[decode] msgType  = 0x{msgType:X4}");
@@ -23,61 +26,53 @@ namespace SocketClient.Protocol
             Console.WriteLine($"[decode] phase    = 0x{phase:X4}");
             Console.WriteLine($"[decode] reserved = 0x{reserved:X4}");
 
-            byte[] payload = frame.Skip(10).ToArray();
-
-            // ---- ZLIB HEADER CHECK ----
-            bool looksLikeZlib =
-                payload.Length >= 2 &&
-                payload[0] == 0x78 &&
-                (payload[1] == 0x9C || payload[1] == 0xDA || payload[1] == 0x01);
-
-            Console.WriteLine($"[decode] compressed payload length = {payload.Length}");
-            Console.WriteLine($"[decode] zlib header detected = {looksLikeZlib}");
-
-            // Attempt safe inflate
-            if (!TryInflate(payload, looksLikeZlib, out var inflated))
+            int payloadLen = frame.Length - 10;
+            if (payloadLen <= 0)
             {
-                Console.WriteLine("[decode] inflation failed (expected for some phases)");
-                LastInflatedPayload = payload;
+                Console.WriteLine("[decode] no payload");
                 return;
             }
 
-            LastInflatedPayload = inflated;
-            Console.WriteLine($"[decode] inflated payload length = {inflated.Length}");
-            HexDump.Dump(inflated, inflated.Length, "[INFLATED]");
-        }
+            byte[] payload = br.ReadBytes(payloadLen);
+            LastPayloadRaw = payload;
 
-        // -------------------------------------------------------------
+            bool looksZlib = payload.Length >= 2 && payload[0] == 0x78;
 
-        private static bool TryInflate(byte[] data, bool zlibWrapped, out byte[] result)
-        {
+            Console.WriteLine($"[decode] compressed payload length = {payload.Length}");
+            Console.WriteLine($"[decode] zlib header detected = {looksZlib}");
+
+            if (!looksZlib)
+            {
+                Console.WriteLine("[decode] payload left untouched");
+                return;
+            }
+
+            // ---- SAFE INFLATE (BEST-EFFORT ONLY) ----
             try
             {
-                byte[] source = data;
+                using var comp = new MemoryStream(payload);
+                using var zlib = new DeflateStream(comp, CompressionMode.Decompress, leaveOpen: true);
+                using var outMs = new MemoryStream();
 
-                // Strip zlib header if present
-                if (zlibWrapped)
-                {
-                    source = data.Skip(2).ToArray();
-                }
+                zlib.CopyTo(outMs);
+                LastInflatedPayload = outMs.ToArray();
 
-                using var input = new MemoryStream(source);
-                using var inflater = new DeflateStream(input, CompressionMode.Decompress);
-                using var output = new MemoryStream();
-
-                inflater.CopyTo(output);
-                result = output.ToArray();
-                return true;
+                Console.WriteLine($"[decode] inflated payload length = {LastInflatedPayload.Length}");
+                HexDump.Dump(LastInflatedPayload, LastInflatedPayload.Length, "[INFLATED]");
             }
-            catch (Exception ex)
+            catch (InvalidDataException)
             {
-                Console.WriteLine($"[decode] inflate error: {ex.GetType().Name} - {ex.Message}");
-                result = Array.Empty<byte>();
-                return false;
+                // EXPECTED for Phase-1 on some servers
+                Console.WriteLine("[decode] inflate failed (nonstandard compression)");
+                Console.WriteLine("[decode] payload preserved raw (expected behavior)");
+                LastInflatedPayload = null;
             }
         }
 
-        private static ushort ReadU16(byte[] b, int o)
-            => (ushort)((b[o] << 8) | b[o + 1]);
+        private static ushort ReadBE16(BinaryReader br)
+        {
+            var b = br.ReadBytes(2);
+            return (ushort)((b[0] << 8) | b[1]);
+        }
     }
 }
