@@ -1,57 +1,18 @@
-using System;
-using System.IO;
-using System.IO.Compression;
-
 namespace SocketClient.Protocol
 {
-    /// <summary>
-    /// Builds outbound DeltaWorlds authentication frames
-    /// matching the observed server envelope format.
-    /// </summary>
-    public static class AuthFrameBuilder
+    internal static class AuthFrameBuilder
     {
-        /// <summary>
-        /// Builds a complete auth envelope frame.
-        /// Header fields are written big-endian.
-        /// Payload is zlib-compressed.
-        /// </summary>
-        public static byte[] Build(
-            ushort messageType,
-            ushort flags,
-            ushort phase,
-            byte[] inflatedPayload)
+        public static byte[] BuildPhase2Probe()
         {
-            byte[] compressedPayload = CompressZlib(inflatedPayload);
-
-            ushort totalLength = (ushort)(10 + compressedPayload.Length);
-
-            using var ms = new MemoryStream(totalLength);
-
-            WriteBE(ms, totalLength);
-            WriteBE(ms, messageType);
-            WriteBE(ms, flags);
-            WriteBE(ms, phase);
-            WriteBE(ms, 0x0000); // reserved
-
-            ms.Write(compressedPayload, 0, compressedPayload.Length);
-
-            return ms.ToArray();
-        }
-
-        private static byte[] CompressZlib(byte[] data)
-        {
-            using var output = new MemoryStream();
-            using (var z = new ZLibStream(output, CompressionLevel.Optimal, leaveOpen: true))
+            // STRUCTURAL replay only — known-good envelope
+            return new byte[]
             {
-                z.Write(data, 0, data.Length);
-            }
-            return output.ToArray();
-        }
-
-        private static void WriteBE(Stream s, ushort value)
-        {
-            s.WriteByte((byte)(value >> 8));
-            s.WriteByte((byte)(value & 0xFF));
+                0x00, 0x0A,
+                0x00, 0x02,
+                0x00, 0x24,
+                0x00, 0x03,
+                0x00, 0x00
+            };
         }
     }
 }

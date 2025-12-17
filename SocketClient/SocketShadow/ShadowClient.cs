@@ -21,20 +21,19 @@ namespace SocketClient
             var sw = Stopwatch.StartNew();
 
             using var client = new TcpClient { NoDelay = true };
-
             Log("connecting...");
             client.Connect(HOST, PORT);
             Log($"connected @ {sw.ElapsedMilliseconds}ms");
 
             using var stream = client.GetStream();
-            stream.ReadTimeout = 5000;
-            stream.WriteTimeout = 5000;
+            stream.ReadTimeout = 8000;
+            stream.WriteTimeout = 8000;
 
             Thread.Sleep(TimingProfile.AfterConnectDelay);
 
-            // =====================================================
-            // PHASE 1 — VERIFIED CLIENT HELLO
-            // =====================================================
+            // -------------------------------------------------
+            // CLIENT HELLO (verified)
+            // -------------------------------------------------
             byte[] clientHello =
             {
                 0x00, 0x0A,
@@ -45,64 +44,48 @@ namespace SocketClient
             };
 
             Send(stream, clientHello, "client-hello");
-
             Thread.Sleep(TimingProfile.BeforeLoginDelay);
 
-            // =====================================================
-            // PHASE 1 RESPONSE — SERVER ENVELOPE
-            // =====================================================
-            byte[] buffer = new byte[8192];
+            // -------------------------------------------------
+            // PHASE 1 RESPONSE
+            // -------------------------------------------------
+            byte[] phase1 = ReadFrame(stream, "phase1");
+            AuthEnvelopeDecoder.Decode(phase1);
+
+            // -------------------------------------------------
+            // LOGIN FRAME (STRUCTURAL ONLY — already verified)
+            // -------------------------------------------------
+            Log("sending login-frame candidate");
+            byte[] loginFrame = AuthFrameBuilder.BuildPhase2Probe();
+            Send(stream, loginFrame, "login-frame");
+
+            // -------------------------------------------------
+            // PHASE 2 SERVER CHALLENGE (CAPTURE ONLY)
+            // -------------------------------------------------
+            Log("waiting for phase-2 challenge");
+            byte[] phase2 = ReadFrame(stream, "phase2");
+
+            Phase2ChallengeDecoder.DecodeHeaderOnly(phase2);
+
+            Log("phase-2 captured successfully — exiting cleanly");
+        }
+
+        private static byte[] ReadFrame(NetworkStream stream, string label)
+        {
+            var buffer = new byte[8192];
             int read = stream.Read(buffer, 0, buffer.Length);
 
             if (read <= 0)
-            {
-                Log("server closed connection");
-                return;
-            }
+                throw new IOException("server closed connection");
 
-            byte[] envelope = buffer.Take(read).ToArray();
-            File.WriteAllBytes("captures/server-envelope.bin", envelope);
+            byte[] frame = buffer.Take(read).ToArray();
+            string path = $"captures/{label}-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.bin";
+            File.WriteAllBytes(path, frame);
 
-            Log($"received server envelope ({read} bytes)");
-            HexDump.Dump(envelope, envelope.Length, "[RX]");
+            Log($"received {label} ({read} bytes)");
+            HexDump.Dump(frame, frame.Length, "[RX]");
 
-            AuthEnvelopeDecoder.Decode(envelope);
-
-            // =====================================================
-            // PHASE 2 — LOGIN FRAME (STRUCTURAL REPLAY)
-            // =====================================================
-            Log("building login-frame candidate");
-
-            byte[] loginFrame = AuthFrameBuilder.Build(
-                messageType: 0x0000,
-                flags: 0xFFFF,
-                phase: 0x0002,
-                inflatedPayload: AuthEnvelopeDecoder.LastInflatedPayload
-            );
-
-            Send(stream, loginFrame, "login-frame");
-
-            // =====================================================
-            // PHASE 2 RESPONSE — SERVER CHALLENGE
-            // =====================================================
-            Log("waiting for phase-2 login response");
-
-            read = stream.Read(buffer, 0, buffer.Length);
-            if (read <= 0)
-            {
-                Log("server closed connection");
-                return;
-            }
-
-            byte[] phase2 = buffer.Take(read).ToArray();
-            File.WriteAllBytes("captures/phase2-challenge.bin", phase2);
-
-            Log($"received {read} bytes");
-            HexDump.Dump(phase2, phase2.Length, "[RX]");
-
-            Phase2ChallengeDecoder.Decode(phase2);
-
-            Log("complete — exiting cleanly");
+            return frame;
         }
 
         private static void Send(NetworkStream s, byte[] data, string label)

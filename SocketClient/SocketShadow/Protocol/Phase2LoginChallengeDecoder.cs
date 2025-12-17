@@ -1,14 +1,16 @@
 using System;
-using System.IO;
-using System.Linq;
 
 namespace SocketClient.Protocol
 {
     internal static class Phase2ChallengeDecoder
     {
-        public static byte[] Decode(byte[] frame)
+        public static void DecodeHeaderOnly(byte[] frame)
         {
-            Console.WriteLine("[phase2] decoding server challenge");
+            if (frame.Length < 12)
+            {
+                Console.WriteLine("[phase2] frame too short");
+                return;
+            }
 
             ushort totalLen = ReadU16(frame, 0);
             ushort msgType  = ReadU16(frame, 2);
@@ -16,24 +18,14 @@ namespace SocketClient.Protocol
             ushort flags    = ReadU16(frame, 8);
             uint   sig      = ReadU32(frame, 10);
 
+            Console.WriteLine("[phase2] decoding server challenge");
             Console.WriteLine($"[phase2] totalLen = {totalLen}");
             Console.WriteLine($"[phase2] msgType  = 0x{msgType:X4}");
             Console.WriteLine($"[phase2] phase    = 0x{phase:X4}");
             Console.WriteLine($"[phase2] flags    = 0x{flags:X4}");
             Console.WriteLine($"[phase2] sig      = 0x{sig:X8}");
 
-            int payloadOffset = 14;
-            byte[] payload = frame.Skip(payloadOffset).ToArray();
-
-            Console.WriteLine($"[phase2] payload length = {payload.Length}");
-            HexDump.Dump(payload, Math.Min(payload.Length, 256), "[phase2-payload]");
-
-            File.WriteAllBytes(
-                $"captures/phase2-payload-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}.bin",
-                payload
-            );
-
-            return payload;
+            Console.WriteLine("[phase2] payload left untouched (by design)");
         }
 
         private static ushort ReadU16(byte[] b, int o)
