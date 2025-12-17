@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Runtime.InteropServices;
-using ConsoleApp.Crypto;
 using ConsoleApp.Instrumentation;
 
 namespace ConsoleApp
@@ -84,9 +83,6 @@ namespace ConsoleApp
 
             Console.WriteLine("Yert");
 
-            // Install crypto hooks BEFORE SDK initialization
-            StateTrace.Log("crypto_hooks_install");
-            BouncyCastleHooks.Install();
 
             // aw_init
             StateTrace.Log("aw_init", "build=101");

@@ -2,23 +2,23 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <!-- CRITICAL: Allows hostfxr to load this as a plugin -->
-    <EnableDynamicLoading>true</EnableDynamicLoading>
-    <!-- CRITICAL: Prevents the linker from removing the EntryPoint -->
-    <PublishTrimmed>false</PublishTrimmed>
-    <!-- CRITICAL: Matches the native process architecture (dworld.exe) -->
-    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- Renaming assembly to match your native string perfectly -->
+    <OutputType>Exe</OutputType>
+
+    <!-- ARCHITECTURE FIX -->
+    <PlatformTarget>x64</PlatformTarget>
+
     <AssemblyName>U-DW-ManagedWrapper</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
+  <!-- HARD ISOLATION: only compile the harness -->
   <ItemGroup>
-    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.2" />
-    <PackageReference Include="Lib.Harmony" Version="2.4.2" />
+    <Compile Remove="**\*.cs" />
+    <Compile Include="Program.cs" />
+    <Compile Include="Instrumentation\**\*.cs" />
   </ItemGroup>
-
 
 </Project>
