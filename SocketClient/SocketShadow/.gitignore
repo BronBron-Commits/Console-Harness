@@ -1,0 +1,12 @@
+# SDK / native binaries
+*.dll
+*.pdb
+Sdk/
+SdkCore.*
+
+# Captures / artifacts
+captures/
+*.bin
+
+# Local junk
+git/
